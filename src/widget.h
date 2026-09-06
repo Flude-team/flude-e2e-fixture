@@ -12,3 +12,8 @@ public:
      */
     bool doThing();
 };
+
+class UndocumentedWidget {
+public:
+    void doAnotherThing();
+};
