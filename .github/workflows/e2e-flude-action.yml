@@ -19,7 +19,7 @@ jobs:
         id: flude
         uses: Flude-team/flude-action@main
         with:
-          api-token: "invalid-token-for-red-run"
+          api-token: ${{ secrets.FLUDE_E2E_LIVE_API_TOKEN }}
           api-base-url: 'https://flude-worker-controlplane-555636434059.us-central1.run.app'
           language: 'cpp'
           poll-interval-seconds: '10'
