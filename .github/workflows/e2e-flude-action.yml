@@ -1,0 +1,82 @@
+name: E2E against live control-plane
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+jobs:
+  e2e-live:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout fixture
+        uses: actions/checkout@v4
+
+      - name: Run flude-action against the live control-plane
+        id: flude
+        uses: Flude-team/flude-action@main
+        with:
+          api-token: ${{ secrets.FLUDE_E2E_LIVE_API_TOKEN }}
+          api-base-url: 'https://flude-worker-controlplane-555636434059.us-central1.run.app'
+          language: 'cpp'
+          poll-interval-seconds: '10'
+          max-wait-seconds: '600'
+
+      - name: Checkout flude-action to get zip-extract.js
+        uses: actions/checkout@v4
+        with:
+          repository: 'Flude-team/flude-action'
+          path: 'flude-action-repo'
+
+      - name: Verify outputs (unpack and check class)
+        run: |
+          set -euo pipefail
+          test -n "${{ steps.flude.outputs.job-id }}"
+          test "${{ steps.flude.outputs.status }}" = "succeeded"
+          test -n "${{ steps.flude.outputs.result-url }}"
+          test -f "${{ steps.flude.outputs.result-path }}"
+          
+          # Use inline node script to unpack and verify
+          # Must write it to a file so we can run it as an ES module or pass --input-type=module
+          cat << 'JS_EOF' > verify.mjs
+          import { readFileSync } from 'node:fs';
+          import { listZipEntries, extractZipEntry } from './flude-action-repo/src/zip-extract.js';
+          
+          const zipPath = process.env.RESULT_PATH;
+          const buffer = readFileSync(zipPath);
+          const entries = listZipEntries(buffer);
+          
+          let found = false;
+          for (const entry of entries) {
+            // Check all markdown and html files
+            if (entry.fileName.endsWith('.md') || entry.fileName.endsWith('.html')) {
+              const content = extractZipEntry(buffer, entry.fileName).toString('utf-8');
+              if (content.includes('UndocumentedWidget')) {
+                found = true;
+                break;
+              }
+            }
+          }
+          
+          if (!found) {
+            console.error('UndocumentedWidget not found in any extracted file in the output archive');
+            process.exit(1);
+          } else {
+            console.log('UndocumentedWidget successfully found in extracted archive.');
+          }
+          JS_EOF
+          
+          RESULT_PATH="${{ steps.flude.outputs.result-path }}" node verify.mjs
+
+      - name: Send Alerts
+        if: failure()
+        continue-on-error: true
+        uses: Flude-team/flude-action/.github/actions/notify@main
+        with:
+          status: ${{ job.status }}
+          telegram_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          telegram_to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
